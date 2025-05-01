@@ -1,13 +1,19 @@
 ### Option in main.py:
 ```
+usage: reliable_transport [-h] -p {gbn,opt} --mode {sender,receiver} [--host HOST] --port PORT [--window WINDOW]
+                          [--timeout TIMEOUT] [--chunk CHUNK]
+
+Simple reliable transport: GBN, SR(opt) over UDP
+
+options:
   -h, --help            show this help message and exit
-  -p {sw,gbn,sr}, --protocol {sw,gbn,sr}
-                        Protocol: sw=Stop-and-Wait, gbn=Go-Back-N, sr=Selective Repeat
+  -p {gbn,opt}, --protocol {gbn,opt}
+                        Protocol: gbn=Go-Back-N, opt=Selective Repeat (RTP-opt)
   --mode {sender,receiver}
                         Mode: sender or receiver
   --host HOST           Destination IP (sender) or bind address (receiver)
   --port PORT           UDP port to send to or listen on
-  --window WINDOW       Window size for gbn/sr
+  --window WINDOW       Window size for gbn/opt
   --timeout TIMEOUT     Retransmission timeout in seconds
   --chunk CHUNK         Payload size per packet in bytes
 ```
