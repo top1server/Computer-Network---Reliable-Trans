@@ -2,9 +2,9 @@ import socket
 import struct
 import threading
 import zlib
-from utils import make_packet, parse_packet, HEADER_SIZE
 import os
-import math
+import time
+from utils import make_packet, parse_packet, HEADER_SIZE
 
 def run(args):
     print(f"[GBN run] args={args}")
@@ -15,9 +15,7 @@ def run(args):
         print("[GBN run] Receiver mode")
         _gbn_receiver(args)
 
-
 def _gbn_sender(args):
-    print(f"[GBN Sender] Sending to {args.host}:{args.port}, window={args.window}, chunk={args.chunk}, timeout={args.timeout}")
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.settimeout(0.1)
     base = 0
@@ -25,6 +23,9 @@ def _gbn_sender(args):
     window = {}
     lock = threading.Lock()
     timer = None
+    eof = False
+    max_retries = 10
+    retries = 0
 
     def start_timer():
         nonlocal timer
@@ -34,18 +35,32 @@ def _gbn_sender(args):
         timer.start()
 
     def timeout_handler():
+        nonlocal retries
         with lock:
             print(f"[GBN Sender] TIMEOUT, retransmitting window {base}→{next_seq-1}")
+            retries += 1
+            if retries > max_retries:
+                print(f"[GBN Sender] Max retries exceeded, giving up")
+                return
             for s in range(base, next_seq):
-                sock.sendto(window[s], (args.host, args.port))
+                if s in window:  # Kiểm tra xem gói còn trong window không
+                    sock.sendto(window[s], (args.host, args.port))
         start_timer()
 
     with open('input.dat', 'rb') as f:
-        while True:
+        while not (eof and base == next_seq) and retries <= max_retries:
+            # Gửi gói mới nếu cửa sổ chưa đầy
             with lock:
-                if next_seq < base + args.window:
+                while not eof and next_seq < base + args.window:
                     data = f.read(args.chunk)
                     if not data:
+                        eof = True
+                        # Gửi gói EOF để thông báo kết thúc file
+                        eof_packet = make_packet(next_seq, b'EOF')
+                        window[next_seq] = eof_packet
+                        sock.sendto(eof_packet, (args.host, args.port))
+                        print(f"[GBN Sender] Sent EOF packet, seq={next_seq}")
+                        next_seq += 1
                         break
                     pkt = make_packet(next_seq, data)
                     window[next_seq] = pkt
@@ -54,40 +69,69 @@ def _gbn_sender(args):
                     if base == next_seq:
                         start_timer()
                     next_seq += 1
+            # Đợi ACK hoặc timeout
             try:
                 raw, _ = sock.recvfrom(4)
                 ack = struct.unpack('!I', raw)[0]
                 with lock:
                     print(f"[GBN Sender] Received ACK={ack}")
-                    if base <= ack < next_seq:
-                        base = ack + 1
+                    # Chỉ cập nhật base nếu ack > base
+                    if base < ack <= next_seq:
+                        # Xóa các gói đã được xác nhận
+                        for s in range(base, ack):
+                            if s in window:
+                                del window[s]
+                        base = ack
+                        retries = 0  # Reset số lần thử lại
                         if base == next_seq:
-                            timer.cancel()
+                            if timer:
+                                timer.cancel()
                         else:
                             start_timer()
-            except socket.timeout:
+            except (socket.timeout, ConnectionResetError):
                 continue
+
+    # Dọn dẹp
     if timer:
         timer.cancel()
     sock.close()
-
+    print("[GBN Sender] Transfer completed.")
 
 def _gbn_receiver(args):
-    print(f"[GBN Receiver] Listening on {args.host}:{args.port}, chunk={args.chunk}")
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.bind((args.host, args.port))
     expected = 0
+    received_bytes = 0
+    eof_received = False
+
     with open('output.dat', 'wb') as f:
-        while True:
-            packet, addr = sock.recvfrom(HEADER_SIZE + args.chunk)
+        print(f"[GBN Receiver] Listening on {args.host}:{args.port}, chunk={args.chunk}")
+        while not eof_received:
+            try:
+                packet, addr = sock.recvfrom(HEADER_SIZE + args.chunk)
+            except ConnectionResetError:
+                continue
+            
             seq, chksum, payload = parse_packet(packet)
             ok = (zlib.crc32(payload) & 0xffffffff) == chksum
             print(f"[GBN Receiver] Got seq={seq}, checksum_ok={ok}")
-            if seq == expected and ok:
+            
+            # Kiểm tra EOF
+            if payload == b'EOF' and seq == expected and ok:
+                print("[GBN Receiver] Received EOF packet")
+                eof_received = True
+                expected += 1
+            # Nếu là gói đúng thứ tự và checksum hợp lệ
+            elif seq == expected and ok:
                 f.write(payload)
                 f.flush()
+                received_bytes += len(payload)
                 expected += 1
-            ack = expected - 1
+
+            # Luôn gửi ACK cho gói tiếp theo mong đợi
+            ack = expected
             sock.sendto(struct.pack('!I', ack), addr)
             print(f"[GBN Receiver] Sent ACK={ack}")
+
+    print(f"[GBN Receiver] Received {received_bytes} bytes, exiting.")
     sock.close()

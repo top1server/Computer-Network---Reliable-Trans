@@ -14,13 +14,27 @@
 
 ### Open 2 terminals
 Example in Go-back-N protocol:
+
 Run test:
-- Teminal A: Init receiver
+- Seting error in Clumsy
+
+- Reliable Trans base:
++ Teminal A: Init receiver
 ```
 python main.py -p gbn --mode receiver --host 127.0.0.1 --port 9000 --chunk 1024
 ```
 
-- Teminal B: Run sender
++ Teminal B: Run sender
 ```
-python main.py -p gbn --mode sender --host 127.0.0.1 --port 9000 --window 5 --timeout 0.2 --chunk 1024
+python main.py -p gbn --mode sender --host 127.0.0.1 --port 9000 --window 5 --timeout 2 --chunk 1024
+```
+
++ Check 2 file input.dat and output.dat:
+```
+fc /b input.dat output.dat && echo PASS || echo FAIL
+```
+- opt:
+```
+python main.py -p opt --mode receiver --host 127.0.0.1 --port 9000 --chunk 1024
+python main.py -p opt --mode sender --host 127.0.0.1 --port 9000 --timeout 2 --chunk 1024
 ```
